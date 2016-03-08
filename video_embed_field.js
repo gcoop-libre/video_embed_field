@@ -1,6 +1,51 @@
 var _vefMediaFiles = {};
 var vefYouTubeAccessToken = null;
 
+function video_embed_field_youtube_enabled() {
+  return drupalgap.settings.views_embed_field && drupalgap.settings.views_embed_field.youtube;
+}
+
+function theme_video_embed_field_upload_progress(variables) {
+  return '<div ' + drupalgap_attributes(variables.attributes) + '></div>';
+}
+
+function theme_video_embed_field_record_button(variables) {
+  return bl('Record video', null, {
+    attributes: variables.attributes
+  });
+}
+
+function theme_video_embed_field_choose_button(variables) {
+  return bl('Choose video', null, {
+    attributes: variables.attributes
+  });
+}
+
+/**
+ * Returns an array of views_embed_field field names.
+ */
+function video_embed_field_get_fields() {
+  return drupalgap_field_info_fields_from_type('video_embed_field');
+}
+
+/**
+ * Given a field type, this will return an array of field names matching that type or null if none are found.
+ * @param {String} type The type of field.
+ * @returns {Array|null}
+ */
+function drupalgap_field_info_fields_from_type(type) {
+  // @TODO move to DrupalGap core.
+  var field_names = [];
+  var fields = drupalgap_field_info_fields();
+  for (var field_name in fields) {
+    if (!fields.hasOwnProperty(field_name)) { continue; }
+    if (fields[field_name].type && fields[field_name].type == type) {
+      field_names.push(fields[field_name].field_name);
+    }
+  }
+  return empty(field_names) ? null : field_names;
+}
+
 /**
  * Implements hook_field_formatter_view().
  */
@@ -45,21 +90,35 @@ function video_embed_field_field_widget_form(form, form_state, field, instance, 
     element.type = 'textfield';
     //if (drupalgap.settings.mode != 'phonegap' || !video_embed_field_youtube_enabled()) { return; }
 
+    var element_id = element['und'][delta].id;
+
     // Progress indicator.
     element.suffix += theme('video_embed_field_upload_progress', {
-      attributes: { id: element.id + '-vef-upload-progress' }
+      attributes: { id: element_id + '-vef-upload-progress' }
     });
 
     // Record button.
-    var onclick = "vefVideoUploadClick(this, '" + form.id + "', '" + field.field_name + "', " + delta + ", '" + element.id + "')";
-    theme('video_embed_field_record_button', {
+    var onclick = "vefVideoRecordClick('" + form.id + "', '" + field.field_name + "', " + delta + ", '" + element_id + "')";
+    element.suffix += theme('video_embed_field_record_button', {
       attributes: {
-        id: element.id + '-vef-record-button',
+        id: element_id + '-vef-record-button',
         'data-icon': 'video',
         'data-theme': 'b',
         onclick: onclick
       }    
     });
+
+    // Choose video button.
+    var onclick = "vefVideoChooseClick('" + element_id + "')";
+    element.suffix += theme('video_embed_field_choose_button', {
+      attributes: {
+        id: element_id + '-vef-choose-button',
+        'data-icon': 'search',
+        'data-theme': 'b',
+        onclick: onclick
+      }
+    });
+
   }
   catch (error) { console.log('video_embed_field_field_widget_form - ' + error); }
 }
@@ -67,71 +126,75 @@ function video_embed_field_field_widget_form(form, form_state, field, instance, 
 /**
  * Implements hook_form_alter().
  */
-function video_embed_field_form_alter(form, form_state, form_id) {
+//function video_embed_field_form_alter(form, form_state, form_id) {
+//
+//  // Only operate on the node edit form, for now.
+//  if (form_id != 'node_edit') { return; }
+//  var vef_field_names = video_embed_field_get_fields();
+//
+//}
 
-  // Only operate on the node edit form, for now.
-  if (form_id != 'node_edit') { return; }
-  var vef_field_names = video_embed_field_get_fields();
-
+/**
+ * Implements hook_assemble_form_state_into_field().
+ */
+function video_embed_field_assemble_form_state_into_field(entity_type, bundle, form_state_value, field, instance, langcode, delta, field_key) {
+  try {
+    field_key.value = "video_url";
+    var result = form_state_value;
+    return result;
+  }
+  catch (error) {
+    console.log('video_embed_field_assemble_form_state_into_field - ' + error);
+  }
 }
 
-function video_embed_field_youtube_enabled() {
-  return drupalgap.settings.views_embed_field && drupalgap.settings.views_embed_field.youtube;
-}
-
-function theme_video_embed_field_upload_progress(variables) {
-  return '<div ' + drupalgap_attributes(variables.attributes) + '></div>';
-}
-
-function theme_video_embed_field_record_button(variables) {
-  return bl('Record video', null, {
-    attributes: variables.attributes
+var _vefVideoChooseElementID = null;
+function vefVideoChooseClick(element_id) {
+  vefAuthorizeWithGoogle(function() {
+    _vefVideoChooseElementID = element_id;
+    navigator.camera.getPicture(vefVideoChooseSuccess, vefVideoChooseError, { quality: 100,
+      destinationType: Camera.DestinationType.FILE_URI,
+      sourceType: Camera.PictureSourceType.PHOTOLIBRARY,
+      mediaType: Camera.MediaType.VIDEO
+    });
   });
 }
-
-/**
- * Returns an array of views_embed_field field names.
- */
-function video_embed_field_get_fields() {
-  return drupalgap_field_info_fields_from_type('video_embed_field');  
+function vefVideoChooseSuccess(imageURI) {
+  // @WARNING there is a bug here: https://github.com/apache/cordova-plugin-camera/pull/160
+  // You need to use the unofficial camera plugin for the fix, for now.
+  // @TODO this is the kind of path we are looking for: file:/storage/extSdCard/DCIM/Camera/20160308_104133.mp4
+  console.log(imageURI);
+  vefUploadVideo(imageURI, _vefVideoChooseElementID);
 }
-
-/**
- * Given a field type, this will return an array of field names matching that type or null if none are found.
- * @param {String} type The type of field.
- * @returns {Array|null}
- */
-function drupalgap_field_info_fields_from_type(type) {
-  var field_names = [];
-  var fields = drupalgap_field_info_fields();
-  for (var field_name in fields) {
-    if (!fields.hasOwnProperty(field_name)) { continue; }
-    if (fields[field_name].type && fields[field_name].type == type) {
-      field_names.push(fields[field_name].field_name);
-    }
-  }
-  return empty(field_names) ? null : field_names;
+function vefVideoChooseError(message) {
+  if (message = 'Selection cancelled.') { return; }
+  alert(message);
 }
 
 /**
  * 
  */
-function vefVideoUploadClick(button, form_id, field_name, delta, element_id) {
+function vefVideoRecordClick(form_id, field_name, delta, element_id) {
 
-  if (!_vefMediaFiles[form_id]) { _vefMediaFiles[form_id] = {}; }
-  if (!_vefMediaFiles[form_id][field_name]) { _vefMediaFiles[form_id][field_name] = {}; }
-  if (!_vefMediaFiles[form_id][field_name][delta]) { _vefMediaFiles[form_id][field_name][delta] = {}; }
+  //if (!_vefMediaFiles[form_id]) { _vefMediaFiles[form_id] = {}; }
+  //if (!_vefMediaFiles[form_id][field_name]) { _vefMediaFiles[form_id][field_name] = {}; }
+  //if (!_vefMediaFiles[form_id][field_name][delta]) { _vefMediaFiles[form_id][field_name][delta] = {}; }
 
   if (drupalgap.settings.mode != 'phonegap') {
     drupalgap_alert('Video upload does not work in web app mode!');
     return;
   }
 
-  if ($('#edit-node-edit-title').val() == '') {
-    drupalgap_alert(t('Enter a video title first.'));
-    return;
-  }
+  //if ($('#edit-node-edit-title').val() == '') {
+  //  drupalgap_alert(t('Enter a video title first.'));
+  //  return;
+  //}
 
+  /**
+   * SECOND
+   */
+
+  // After authenticating with Google, show the video widget.
   var videoWidget = function() {
 
     // Show Cordova's video browser.
@@ -141,9 +204,8 @@ function vefVideoUploadClick(button, form_id, field_name, delta, element_id) {
           for (i = 0, len = mediaFiles.length; i < len; i += 1) {
 
             // Grab the local path to the video file, set it aside, and begin the upload.
-            var path = mediaFiles[i].fullPath;
-            _vefMediaFiles[form_id][field_name][delta] = path;
-            vefUploadVideo(button, path, element_id);
+            //_vefMediaFiles[form_id][field_name][delta] = path;
+            vefUploadVideo(mediaFiles[i].fullPath, element_id);
 
           }
         },
@@ -161,17 +223,26 @@ function vefVideoUploadClick(button, form_id, field_name, delta, element_id) {
 
   };
 
+  /**
+   * FIRST
+   */
+
   // Let's first authorize with Google...
+  vefAuthorizeWithGoogle(videoWidget);
+
+}
+
+function vefAuthorizeWithGoogle(success) {
 
   // If we already have a token, just open the video widget.
   // @TODO this token expires a lot quicker than we expected, ~60 minutes, maybe we can set a larger expire time?
   //if (vefYouTubeAccessToken) {
-  //  videoWidget();
+  //  success();
   //  return;
   //}
 
   // We don't have a token, so we need to get permission from the user and call Google...
-  
+
   // Build the auth options for Google.
   // @TODO client_id should be retrieved from backend
   var authOptions = {
@@ -179,92 +250,103 @@ function vefVideoUploadClick(button, form_id, field_name, delta, element_id) {
     redirect_uri: 'http://localhost',
     scope: 'https://www.googleapis.com/auth/youtube'
   };
-  
+
   // Make the authorization call to Google...
   vef_googleapi.authorize(authOptions).done(function(data) {
-    
+
     // Set aside the access token, save it to local storage so the user doesn't need to agree again later, then launch
     // the video widget.
     vefYouTubeAccessToken = data.access_token;
     window.localStorage.setItem("vefYouTubeAccessToken", vefYouTubeAccessToken);
-    videoWidget();
+    success();
 
   });
-
 }
 
-function vefUploadVideo(button, fileURL, element_id) {
+function vefUploadVideo(fileURL, element_id) {
 
-  // @see https://developers.google.com/youtube/v3/docs/videos/insert
-  // @see https://github.com/youtube/api-samples/tree/master/javascript
+  try {
+    // @see https://developers.google.com/youtube/v3/docs/videos/insert
+    // @see https://github.com/youtube/api-samples/tree/master/javascript
 
-  var metadata = {
-    snippet: {
-      title: $('#edit-node-edit-title').val(),
-      //description: $('#description').text(),
-      //tags: this.tags,
-      categoryId: 22
-    },
-    status: {
-      privacyStatus: 'unlisted'
-    }
-  };
+    console.log('building meta data');
+    var metadata = {
+      snippet: {
+        title: drupalgap.settings.title + ' - ' + time(),
+        //description: $('#description').text(),
+        //tags: this.tags,
+        categoryId: 22
+      },
+      status: {
+        privacyStatus: 'unlisted'
+      }
+    };
 
-  var options = new FileUploadOptions();
-  options.fileKey = 'file';
-  options.fileName = fileURL.substr(fileURL.lastIndexOf('/') + 1);
-  options.mimeType = 'video/mpg';
-  options.chunkedMode = false;
-  options.headers = {
-    Authorization: 'Bearer ' + vefYouTubeAccessToken
-  };
-  //options.params = {
-  //  "": {
-  //    snippet: {
-  //      title: 'Video title',
-  //      description: 'Video description',
-  //      tags: 'Video tags',
-  //      categoryId: 22
-  //    },
-  //    status: {
-  //      privacyStatus: 'unlisted'
-  //    }
-  //  }
-  //};
-  options.params = {
-    part: Object.keys(metadata).join(',')
-  };
+    console.log('building file upload');
+    var options = new FileUploadOptions();
+    options.fileKey = 'file';
+    options.fileName = fileURL.substr(fileURL.lastIndexOf('/') + 1);
+    options.mimeType = 'video/mpg';
+    options.chunkedMode = false;
+    options.headers = {
+      Authorization: 'Bearer ' + vefYouTubeAccessToken
+    };
+    //options.params = {
+    //  "": {
+    //    snippet: {
+    //      title: 'Video title',
+    //      description: 'Video description',
+    //      tags: 'Video tags',
+    //      categoryId: 22
+    //    },
+    //    status: {
+    //      privacyStatus: 'unlisted'
+    //    }
+    //  }
+    //};
+    options.params = {
+      part: Object.keys(metadata).join(',')
+    };
 
-  // Start the file transfer.
-  $(button).hide();
-  var ft = new FileTransfer();
-  ft.upload(
-    fileURL,
-    'https://www.googleapis.com/upload/youtube/v3/videos?part=snippet,status',
-    function (data) {
-      drupalgap_alert(t('Video successfully uploaded to YouTube.'), {
-        title: t('Upload complete'),
-        buttonName: t('OK'),
-        alertCallback: function() {
-          var response = JSON.parse(data.response);
-          var watchURL = 'https://www.youtube.com/watch?v=' + response.id;
-          $('#' + element_id).val(watchURL);
-        }
-      });
-    },
-    function (e) {
-      drupalgap_alert(t('Sorry, the video upload failed!'));
-      console.log(JSON.stringify(e));
-    },
-    options,
-    true
-  );
+    // Hide the buttons.
+    $('#' + element_id + '-vef-record-button').hide();
+    $('#' + element_id + '-vef-choose-button').hide();
 
-  // Upload the progress message along the way.
-  ft.onprogress = function (progressEvent) {
-    var percent = ((progressEvent.loaded / progressEvent.total) * 100).toFixed(2);
-    $('#' + element_id + '-vef-upload-progress').html('Uploading to YouTube: ' + percent + '%');
-  };
+    console.log('building file transfer');
+    // Start the file transfer.
+    var ft = new FileTransfer();
+    ft.upload(
+        fileURL,
+        'https://www.googleapis.com/upload/youtube/v3/videos?part=snippet,status',
+        function (data) {
+          drupalgap_alert(t('Video successfully uploaded to YouTube.'), {
+            title: t('Upload complete'),
+            buttonName: t('OK'),
+            alertCallback: function() {
+              var response = JSON.parse(data.response);
+              var watchURL = 'https://www.youtube.com/watch?v=' + response.id;
+              $('#' + element_id).val(watchURL);
+            }
+          });
+        },
+        function (e) {
+          drupalgap_alert(t('Sorry, the video upload failed!'));
+          console.log(JSON.stringify(e));
+        },
+        options,
+        true
+    );
+
+    console.log('progress indicator');
+    // Upload the progress message along the way.
+    ft.onprogress = function (progressEvent) {
+      var percent = ((progressEvent.loaded / progressEvent.total) * 100).toFixed(2);
+      $('#' + element_id + '-vef-upload-progress').html('Uploading to YouTube: ' + percent + '%');
+    };
+  }
+  catch (error) {
+    console.log('vefUploadVideo - ' + error);
+  }
 
 }
 
