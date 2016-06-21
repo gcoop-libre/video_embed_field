@@ -205,7 +205,7 @@ function vefVideoRecordClick(form_id, field_name, delta, element_id) {
 
             // Grab the local path to the video file, set it aside, and begin the upload.
             //_vefMediaFiles[form_id][field_name][delta] = path;
-            vefUploadVideo(mediaFiles[i].fullPath, element_id);
+            vefUploadVideo(mediaFiles[i].fullPath, element_id, mediaFiles[i]);
 
           }
         },
@@ -263,7 +263,7 @@ function vefAuthorizeWithGoogle(success) {
   });
 }
 
-function vefUploadVideo(fileURL, element_id) {
+function vefUploadVideo(fileURL, element_id, mediaFile) {
 
   try {
     // @see https://developers.google.com/youtube/v3/docs/videos/insert
